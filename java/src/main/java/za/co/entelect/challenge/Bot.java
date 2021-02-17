@@ -17,9 +17,6 @@ public class Bot {
     private final Position center = new Position(16, 16);
 
 
-    public void printnih() {
-        System.out.println(currentWorm.id);
-    }
 
     public Bot(Random random, GameState gameState) {
         this.random = random;
@@ -42,28 +39,34 @@ public class Bot {
 
 
     public Command run() {
-        Cell blockTemp = cellTerjauh3(currentWorm.position, opponent);
-        Cell block = cellTerdekat(currentWorm.position.x, currentWorm.position.y, blockTemp.x, blockTemp.y);
 
+        Cell block;
         // Mencatat hal-hal penting
         final Worm enemyWorm = getFirstWormInRange(currentWorm.position.x, currentWorm.position.y);
         final List<MyWorm> otherWorms = Arrays.stream(gameState.myPlayer.worms).filter(worm -> worm != currentWorm && worm.health > 0).collect(Collectors.toList());
         final List<MyWorm> temenSekitarSekarang = getSurroundingAlly(currentWorm.position.x, currentWorm.position.y, 4);
-        final List<Worm> cacingMusuhDisekitar = getSurroundingWorm(currentWorm.position.x, currentWorm.position.y, 4);
+        // List Musuh di sekitar
+        final List<Worm> cacingMusuhDisekitar = getSurroundingWorm(currentWorm.position.x, currentWorm.position.y, 5);
+        // List Cell yang aman
         final List<Cell> cellPelarian = runawayBlock(currentWorm.position.x, currentWorm.position.y);
+        // List Cell untuk menembak musuh
         final List<Cell> cellHuntMusuh = cellUntukMenembak(currentWorm.position.x, currentWorm.position.y);
-
 
         // Menjauh dari Lava strategy
         if (disekitarLava(currentWorm.position.x, currentWorm.position.y)) {
-            System.out.println("disekitar lava");
-            Cell menujuPusatBumi = cellTerdekat(currentWorm.position.x, currentWorm.position.y, center.x, center.y);
-            return galiAtoGerakAtoDiem(menujuPusatBumi);
+            List<CellWithDistance> menujuPusatBumi = listcellTerdekat(currentWorm.position.x, currentWorm.position.y, center.x, center.y);
+            for (CellWithDistance cwd : menujuPusatBumi){
+                Worm botmusuh = getFirstWormInRange(cwd.cell.x, cwd.cell.y);
+                if (cwd.cell.type == CellType.AIR && cwd.cell.occupier == null && botmusuh == null) {
+                    return new MoveCommand(cwd.cell.x,cwd.cell.y);
+                }
+            }
+
+            return galiAtoGerakAtoDiem(menujuPusatBumi.get(0).cell);
         }
 
 
         // Special Power Strategy
-        System.out.println("jumlah musuh sekitar: " + cacingMusuhDisekitar.size());
         for (Worm worm : cacingMusuhDisekitar) {
             if (currentWorm.canBananaBomb()) {
                 return new BananaBombCommand(worm.position.x, worm.position.y);
@@ -77,10 +80,9 @@ public class Bot {
 
         // Jika Menang skor farming atau kabur-kaburan (late game)
         if (gameState.myPlayer.score > opponent.score) {
-            System.out.println("menang skor");
-
             if (cacingMusuhDisekitar.size() > 1 && temenSekitarSekarang.size() == 0) {
                 // run strategy
+                // Dikeroyok dan sendirian kabur
                 for (Cell cell : cellPelarian) {
                     if (cell.type == CellType.AIR) {
                         return new MoveCommand(cell.x, cell.y);
@@ -88,15 +90,15 @@ public class Bot {
                 }
             }
 
-            // Farm startegy jika round masih < 300
+            // Farm startegy jika round masih <= 300
             if (gameState.currentRound <= 300) {
                 if (cacingMusuhDisekitar.size() >= 1) {
                     int totalDarahMusuh = 0;
                     for (Worm worm : cacingMusuhDisekitar) {
                         totalDarahMusuh += worm.health;
                     }
-
-                    if (currentWorm.health > totalDarahMusuh) {
+                    // Walaupun musuh lebih dari 1, jika kita menang darah lawan aja
+                    if (currentWorm.health > totalDarahMusuh+30) {
                         // Berburu Musuh
                         if (enemyWorm == null) {
                             for (Cell cell : cellHuntMusuh) {
@@ -116,8 +118,9 @@ public class Bot {
 
 
                 }
-                // Farming jika sendirian
+
                 else {
+                    // Farming jika sendirian (tidak ada musuh)
                     Command farmDay = farming(currentWorm.position.x, currentWorm.position.y);
                     if ((enemyWorm == null || enemyWorm.health <= 0) && farmDay != null) {
                         return farmDay;
@@ -140,46 +143,53 @@ public class Bot {
                 }
             }
 
-            if (enemyWorm != null && enemyWorm.health > 0) {
-                Direction direction = resolveDirection(currentWorm.position, enemyWorm.position);
-                return new ShootCommand(direction);
-            }
+
+
+//            if (enemyWorm != null && enemyWorm.health > 0) {
+//                Direction direction = resolveDirection(currentWorm.position, enemyWorm.position);
+//                return new ShootCommand(direction);
+//            }
+
+            List<Cell> surroundingBlocks = getSurroundingCells(currentWorm.position.x, currentWorm.position.y);
+            int cellIdx = random.nextInt(surroundingBlocks.size());
+            block = surroundingBlocks.get(cellIdx);
+            return galiAtoGerakAtoDiem(block);
+
         }
 
 
         // Jika kalah skor maka baku hantam
         else {
-            System.out.println("kalah skor");
-            // Jika ada musuh solo di sekitar, buru dia
-            if (enemyWorm == null && cacingMusuhDisekitar.size() == 1) {
-                for (Cell cell : cellHuntMusuh) {
-                    if (cell.type == CellType.AIR) {
-                        System.out.println("musuh nyasar, berburu (angin)");
-                        return new MoveCommand(cell.x, cell.y);
+            // Jika ada musuh solo di sekitar, HUNT HIM
+            if (cacingMusuhDisekitar.size() == 1) {
+                if (enemyWorm == null) {
+                    for (Cell cell : cellHuntMusuh) {
+                        if (cell.type == CellType.AIR) {
+                            return new MoveCommand(cell.x, cell.y);
+                        }
+                    }
+                    for (Cell cell : cellHuntMusuh) {
+                        if (cell.type == CellType.DIRT) {
+                            return new DigCommand(cell.x, cell.y);
+                        }
                     }
                 }
-                for (Cell cell : cellHuntMusuh) {
-                    if (cell.type == CellType.DIRT) {
-                        System.out.println("musuh nyasar, berburu (tanah)");
-                        return new DigCommand(cell.x, cell.y);
+                // Jika ada musuh dalam jarak pandang dan musuh sendirian, tembak saja
+                else {
+                    if (enemyWorm.health > 0) {
+                        Direction direction = resolveDirection(currentWorm.position, enemyWorm.position);
+                        return new ShootCommand(direction);
                     }
                 }
             }
 
-
-            // Jika ada musuh dalam jarak pandang dan musuh sendirian, tembak saja
-            if (enemyWorm != null && cacingMusuhDisekitar.size() == 1) {
-                if (enemyWorm.health > 0) {
-                    System.out.println("musuh nyasar tembak!!!");
-                    Direction direction = resolveDirection(currentWorm.position, enemyWorm.position);
-                    return new ShootCommand(direction);
-                }
-            }
 
             // Jika masih ada teman yang hidup
             if (otherWorms.size() > 0) {
                 // Membantu teman strategy
                 // Bisa select maka select (select hanya dilakukan ketika tidak ada musuh dalam pandangan)
+                // Kalau kita tidak bisa ditembak musuh maka kita men iterasi list (cacing kita yang lain)
+                // Setelah itu membuat list (cacing cacing musuh) yang disekitar cacing kita yang di iterasi tersebut
                 if (enemyWorm == null) {
                     for (MyWorm worm : otherWorms) {
                         List<Worm> cacingMusuhSekitarTeman = getSurroundingWorm(worm.position.x, worm.position.y, 5);
@@ -192,24 +202,25 @@ public class Bot {
 
                             Worm botMusuh = getFirstWormInRange(worm.position.x, worm.position.y);
                             if (botMusuh != null && botMusuh.health > 0) {
-                                System.out.println("select shoot");
                                 Direction direksiUtama = resolveDirection(worm.position, botMusuh.position);
                                 return new SelectCommand(worm.id, new ShootCommand(direksiUtama));
                             }
 
                         }
-
+                        // Mengecek cacing cacing kita yang sedang dalam bahaya
+                        // Cacing dalama bahaya jika memenuhi kondisi bahwa musuh disekitar >= 2
+                        // Dan Teman disekitar <= 1
                         List<MyWorm> TemanSekitarCacing = getSurroundingAlly(worm.position.x, worm.position.y, 4);
                         if (cacingMusuhSekitarTeman.size() >= 2
                                 && TemanSekitarCacing.size() <= 1
                                 && euclideanDistance(currentWorm.position.x, currentWorm.position.y, worm.position.x, worm.position.y) >= 4) {
-                            System.out.println("menuju ke temen");
                             Cell cellKeTemen = cellTerdekat(currentWorm.position.x, currentWorm.position.y, worm.position.x, worm.position.y);
                             return galiAtoGerakAtoDiem(cellKeTemen);
                         }
 
                     }
                 }
+                // Mengecek apakah lebih baik menembak atau lari
                 else {
                     // Jika musuh disektar lebih 1 dan tidak ada teman di sekitar, kabur saja
                     if (cacingMusuhDisekitar.size() > 1 && temenSekitarSekarang.size() == 0) {
@@ -226,14 +237,32 @@ public class Bot {
                             }
                         }
                     }
+                    // Jika musuh = 1 atau ada teman maka tembak
+                    else {
+                        if (enemyWorm.health > 0) {
+                            Direction direction = resolveDirection(currentWorm.position, enemyWorm.position);
+                            return new ShootCommand(direction);
+                        }
+                    }
+                }
+            }
 
-                    if (cacingMusuhDisekitar.size() >= 2) {
-                        if (temenSekitarSekarang.size() >= 1) {
-                            System.out.println("22222222222222");
+            // Jika sisa sendiri
+            if (otherWorms.size() == 0) {
+                if (cacingMusuhDisekitar.size() > 1) {
+                    int totalDarahMusuh = 0;
+                    for (Worm worm : cacingMusuhDisekitar) {
+                        totalDarahMusuh += worm.health;
+                    }
+                    // Berburu Musuh jika total darah kita lebih dari 30 + darah musuh
+                    if (totalDarahMusuh + 30 <= currentWorm.health) {
+                        if (enemyWorm != null) {
                             if (enemyWorm.health > 0) {
                                 Direction direction = resolveDirection(currentWorm.position, enemyWorm.position);
                                 return new ShootCommand(direction);
                             }
+                        }
+                        else {
                             for (Cell cell : cellHuntMusuh) {
                                 if (cell.type == CellType.AIR) {
                                     return new MoveCommand(cell.x, cell.y);
@@ -246,75 +275,23 @@ public class Bot {
                             }
                         }
                     }
-                    if (enemyWorm.health > 0) {
-                        Direction direction = resolveDirection(currentWorm.position, enemyWorm.position);
-                        return new ShootCommand(direction);
-                    }
-                }
-            }
 
-            // Jika sisa sendiri
-            if (otherWorms.size() == 0) {
-                if (cacingMusuhDisekitar.size() > 1) {
-                    int totalDarahMusuh = 0;
-                    for (Worm worm : cacingMusuhDisekitar) {
-                        totalDarahMusuh += worm.health;
-                    }
-                    if (totalDarahMusuh <= currentWorm.health) {
-                        if (enemyWorm != null) {
-                            if (enemyWorm.health > 0) {
-                                Direction direction = resolveDirection(currentWorm.position, enemyWorm.position);
-                                return new ShootCommand(direction);
-                            }
-                        }
-                        for (Cell cell : cellHuntMusuh) {
-                            if (cell.type == CellType.AIR) {
-                                return new MoveCommand(cell.x, cell.y);
-                            }
-                        }
-                        for (Cell cell : cellHuntMusuh) {
-                            if (cell.type == CellType.DIRT) {
-                                return new DigCommand(cell.x, cell.y);
-                            }
+                    // Jika Total darah lebih dikit
+                    for (Cell cell : cellHuntMusuh) {
+                        if (cell.type == CellType.AIR) {
+                            return new MoveCommand(cell.x, cell.y);
                         }
                     }
-                    else {
-                        // Menghindar sampai datang keajaiban
-                        for (Cell cell : cellPelarian) {
-                            if (cell.type == CellType.AIR) {
-                                // Menghindar sampai bala bantuan datang
-                                return new MoveCommand(cell.x, cell.y);
-                            }
+                    for (Cell cell : cellHuntMusuh) {
+                        if (cell.type == CellType.DIRT) {
+                            // Menghindar sampai bala bantuan datang
+                            return new DigCommand(cell.x, cell.y);
                         }
-                        for (Cell cell : cellPelarian) {
-                            if (cell.type == CellType.DIRT) {
-                                // Menghindar sampai bala bantuan datang
-                                return new DigCommand(cell.x, cell.y);
-                            }
-                        }
-                    }
-                }
-                // Jika 1 v 1: pasrahkan saja pada rng
-                if (enemyWorm != null) {
-                    if (enemyWorm.health > 0) {
-                        Direction direction = resolveDirection(currentWorm.position, enemyWorm.position);
-                        return new ShootCommand(direction);
-                    }
-                }
-                for (Cell cell : cellHuntMusuh) {
-                    if (cell.type == CellType.AIR) {
-                        return new MoveCommand(cell.x, cell.y);
-                    }
-                }
-                for (Cell cell : cellHuntMusuh) {
-                    if (cell.type == CellType.DIRT) {
-                        // Menghindar sampai bala bantuan datang
-                        return new DigCommand(cell.x, cell.y);
                     }
                 }
             }
         }
-
+        // Ketika Sendiri dan cacing musuh disekitar = 0
         Command farmDay = farming(currentWorm.position.x, currentWorm.position.y);
         if (enemyWorm != null && enemyWorm.health <= 0 && farmDay != null) {
             return farmDay;
@@ -322,12 +299,10 @@ public class Bot {
         if (enemyWorm == null && farmDay != null) {
             return farmDay;
         }
-        System.out.println("gagal farming");
+
         List<Cell> surroundingBlocks = getSurroundingCells(currentWorm.position.x, currentWorm.position.y);
-//        System.out.println("Panjang block list cell: "+ surroundingBlocks.size());
         int cellIdx = random.nextInt(surroundingBlocks.size());
         block = surroundingBlocks.get(cellIdx);
-        System.out.println("gerak random");
         return galiAtoGerakAtoDiem(block);
 
     }
@@ -338,7 +313,6 @@ public class Bot {
             for (int j = y - 1; j < y + 1; j++) {
                 if (isValidCoordinate(i, j)) {
                     if (gameState.map[j][i].type == CellType.LAVA) {
-                        System.out.println("disekitar lava");
                         return true;
                     }
                 }
@@ -398,10 +372,18 @@ public class Bot {
     // Algoritma farming
     private Command farming(int x, int y) {
         List<Cell> cellSekitar = getSurroundingCells(x, y);
+        for (Cell cell : cellSekitar) {
+            Worm musuh = getFirstWormInRange(x, y);
+            if (musuh == null) {
+                if (cell.type == CellType.DIRT) {
+                    return new DigCommand(cell.x, cell.y);
+                }
+            }
+        }
         List<CellWithDistance> cellSekitar5 = new ArrayList<>();
 //        List<Cell> cellPelarian = runawayBlock(currentWorm.position.x,currentWorm.position.y);
-        for (int i = x - 5; i < x + 5; i++) {
-            for (int j = y - 5; j < y + 5; j++) {
+        for (int i = x - 6; i < x + 6; i++) {
+            for (int j = y - 6; j < y + 6; j++) {
                 int dirtCounter = 0;
                 for (int k = i - 1; k < i + 1; k++) {
                     for (int l = j - 1; l < j + 1; l++) {
@@ -411,24 +393,16 @@ public class Bot {
                     }
                 }
 
-                if (dirtCounter >= 3 && isValidCoordinate(i, j)) {
+                if (dirtCounter >= 1 && isValidCoordinate(i, j)) {
                     cellSekitar5.add(new CellWithDistance(gameState.map[j][i], euclideanDistance(x, y, gameState.map[j][i].x, gameState.map[j][i].y)));
                 }
             }
         }
-        for (Cell cell : cellSekitar) {
-            Worm musuh = getFirstWormInRange(x, y);
-            if (musuh == null) {
-                if (cell.type == CellType.DIRT) {
-                    System.out.println("Farming dlu");
-                    return new DigCommand(cell.x, cell.y);
-                }
-            }
-        }
+        System.out.println("tidak ada dirt disekitar");
+        System.out.println("menuju cell terdekat ");
         Collections.sort(cellSekitar5);
         for (CellWithDistance cwd : cellSekitar5) {
             Cell terdekat = cellTerdekat(x, y, cwd.cell.x, cwd.cell.y);
-            System.out.println("cari dirt");
             return galiAtoGerakAtoDiem(terdekat);
         }
         return null;
@@ -547,7 +521,7 @@ public class Bot {
 
 
     private List<Cell> getSurroundingCells(int x, int y) {
-        ArrayList<Cell> cells = new ArrayList<>();
+        List<Cell> cells = new ArrayList<>();
         for (int i = x - 1; i <= x + 1; i++) {
             for (int j = y - 1; j <= y + 1; j++) {
                 // Don't include the current position
@@ -558,6 +532,16 @@ public class Bot {
         }
 
         return cells;
+    }
+
+    private List<CellWithDistance> listcellTerdekat(int x1, int y1, int x2, int y2) {
+        List<CellWithDistance> hidupku = getSurroundingCells(x1, y1).stream()
+                .map(C -> new CellWithDistance(C, euclideanDistance(C.x, C.y, x2, y2)))
+                .collect(Collectors.toList());
+        Collections.sort((hidupku));
+
+
+        return hidupku;
     }
 
     // Mencari cell terdeket untuk ke posisi tujuan
