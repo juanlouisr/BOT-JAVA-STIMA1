@@ -1,4 +1,4 @@
-# Tubes STIMA 1 - Greedy Bot of the seven sins
+# Tubes STIMA 1 - Greedy Bot of The Seven Sins
 From Entelect Challenge 2019, Membuat "Worm Bot" dengan Algoritma Greedy dalam bahasa Java
 
 ## Strategy Greedy
